@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pschatzmann.github.io)",
+      "WebFetch(domain:docs.espressif.com)",
+      "Bash(find:*)",
+      "Bash(pio pkg show:*)",
+      "WebFetch(domain:docs.m5stack.com)",
+      "WebFetch(domain:m5stack.oss-cn-shenzhen.aliyuncs.com)",
+      "WebFetch(domain:www.mouser.com)",
+      "Bash(tree:*)"
+    ]
+  }
+}

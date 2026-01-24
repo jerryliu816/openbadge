@@ -1,0 +1,100 @@
+/**
+ * OpenBadge Firmware
+ *
+ * ESP32-S3 based Bluetooth Hands-Free headset for GlassBridge AI Assistant
+ *
+ * Target Hardware: M5Stack CoreS3
+ * Bluetooth Profiles: HFP 1.7 (Client), AVRCP 1.6 (Controller)
+ *
+ * Screen Layout:
+ * ┌─────────────────────────────────┐
+ * │      STATUS DISPLAY             │  Color + "Tap to Speak"
+ * ├─────────────────────────────────┤
+ * │      LOG TEXT                   │  Scrolling debug output
+ * └─────────────────────────────────┘
+ *
+ * Workflow:
+ * 1. Device boots and advertises as "OpenBadge"
+ * 2. User pairs via Android Bluetooth settings
+ * 3. GlassBridge app detects connected headset
+ * 4. User taps STATUS section -> sends AVRCP Play/Pause
+ * 5. Phone establishes SCO audio link
+ * 6. Voice flows: Mic -> Phone -> OpenAI -> TTS -> Speaker
+ */
+
+#include <Arduino.h>
+#include "HAL/BoardManager.h"
+#include "Core/BluetoothManager.h"
+
+// Global instances
+IBoard* g_board = nullptr;
+// g_btManager is declared in BluetoothManager.cpp
+
+// Device name advertised over Bluetooth
+static const char* DEVICE_NAME = "OpenBadge";
+
+void setup() {
+    // Initialize serial for debugging (also shown on screen)
+    Serial.begin(115200);
+    delay(500);  // Brief delay for serial
+
+    // Initialize hardware abstraction layer first
+    // This sets up the display so we can show logs
+    g_board = BoardManager::createBoard();
+    g_board->init();
+
+    // Allocate Bluetooth manager
+    g_btManager = new BluetoothManager();
+
+    // Now initialize Bluetooth (logs will appear on screen)
+    g_btManager->init(DEVICE_NAME, g_board);
+
+    g_board->log("Ready to pair!");
+    g_board->log("Scan for 'OpenBadge'");
+}
+
+void loop() {
+    // Update hardware (polls touch)
+    g_board->update();
+
+    // Update Bluetooth manager
+    g_btManager->update();
+
+    // Handle user trigger (touch in STATUS area)
+    if (g_board->isActionTriggered()) {
+        if (g_btManager->canTrigger()) {
+            // Update UI to show we're activating
+            g_board->setLedStatus(StatusState::Listening);
+
+            // Send AVRCP command to trigger GlassBridge (primary method)
+            g_btManager->sendMediaButton();
+
+            // Alternatives if AVRCP doesn't work:
+            // g_btManager->sendHfpButton();  // Sends KEYCODE_HEADSETHOOK
+            // g_btManager->sendBvra();       // Sends AT+BVRA=1 (voice recognition)
+        }
+        // canTrigger() logs the reason if it returns false
+    }
+
+    // Track SCO state changes for UI updates
+    static bool lastScoState = false;
+    bool currentScoState = g_btManager->isScoConnected();
+
+    if (currentScoState != lastScoState) {
+        if (currentScoState) {
+            // SCO just connected - voice session active
+            g_board->setLedStatus(StatusState::Listening);
+        } else {
+            // SCO disconnected - session ended
+            if (g_btManager->isConnected()) {
+                g_board->setLedStatus(StatusState::Idle);
+            } else {
+                g_board->setLedStatus(StatusState::Disconnected);
+            }
+        }
+        lastScoState = currentScoState;
+    }
+
+    // Small delay to prevent tight loop
+    delay(10);
+}

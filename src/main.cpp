@@ -22,6 +22,11 @@
  * 6. Voice flows: Mic -> Phone -> OpenAI -> TTS -> Speaker
  */
 
+// CRITICAL: Override Arduino's weak btInUse() to prevent BT memory release
+// Arduino's initArduino() calls esp_bt_controller_mem_release(ESP_BT_MODE_BTDM)
+// if btInUse() returns false, which prevents our Bluetooth init from working
+extern "C" bool btInUse() { return true; }
+
 #include <Arduino.h>
 #include "HAL/BoardManager.h"
 #include "Core/BluetoothManager.h"
@@ -66,12 +71,12 @@ void loop() {
             // Update UI to show we're activating
             g_board->setLedStatus(StatusState::Listening);
 
-            // Send AVRCP command to trigger GlassBridge (primary method)
-            g_btManager->sendMediaButton();
+            // Try multiple trigger methods (AVRCP might not be connected)
+            g_btManager->sendMediaButton();     // Try AVRCP Play/Pause first
+            g_btManager->sendBvra();            // Also send HFP voice recognition (works without AVRCP)
 
-            // Alternatives if AVRCP doesn't work:
-            // g_btManager->sendHfpButton();  // Sends KEYCODE_HEADSETHOOK
-            // g_btManager->sendBvra();       // Sends AT+BVRA=1 (voice recognition)
+            // Note: sendBvra() sends AT+BVRA=1 which tells the phone to start voice recognition
+            // This works even if AVRCP isn't connected, since it uses HFP which IS connected
         }
         // canTrigger() logs the reason if it returns false
     }

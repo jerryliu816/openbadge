@@ -10,7 +10,12 @@
       "WebFetch(domain:docs.m5stack.com)",
       "WebFetch(domain:m5stack.oss-cn-shenzhen.aliyuncs.com)",
       "WebFetch(domain:www.mouser.com)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)",
+      "WebFetch(domain:android.googlesource.com)"
     ]
   }
 }

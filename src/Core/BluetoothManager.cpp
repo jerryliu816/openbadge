@@ -10,25 +10,24 @@ extern "C" {
 #include "esp_gap_bt_api.h"
 #include "esp_hf_client_api.h"
 #include "esp_avrc_api.h"
+#include "esp_wifi.h"
 }
 
 // Global instance for C callbacks
 BluetoothManager* g_btManager = nullptr;
 
-// Helper macro for logging (uses board if available, falls back to Serial)
+// Helper macro for logging (sends to BOTH serial and screen)
 #define BT_LOG(msg) do { \
+    Serial.println(msg); \
     if (g_btManager && g_btManager->getBoard()) { \
         g_btManager->getBoard()->log(msg); \
-    } else { \
-        Serial.println(msg); \
     } \
 } while(0)
 
 #define BT_LOGF(fmt, ...) do { \
+    Serial.printf(fmt "\n", ##__VA_ARGS__); \
     if (g_btManager && g_btManager->getBoard()) { \
         g_btManager->getBoard()->logf(fmt, ##__VA_ARGS__); \
-    } else { \
-        Serial.printf(fmt "\n", ##__VA_ARGS__); \
     } \
 } while(0)
 
@@ -152,16 +151,21 @@ void BluetoothManager::init(const char* deviceName, IBoard* board) {
     initBluedroid();
 
     // Set device name
-    esp_bt_dev_set_device_name(deviceName);
-    m_board->logf("Device: %s", deviceName);
+    esp_err_t name_ret = esp_bt_dev_set_device_name(deviceName);
+    m_board->logf("Name set: %s (%s)", deviceName, esp_err_to_name(name_ret));
 
     // Register GAP callback
-    esp_bt_gap_register_callback(gap_callback);
+    esp_err_t gap_ret = esp_bt_gap_register_callback(gap_callback);
+    m_board->logf("GAP callback: %s", esp_err_to_name(gap_ret));
 
     // Set SSP (Secure Simple Pairing) mode
     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;  // Just Works pairing
-    esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
+    esp_err_t ssp_ret = esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
+    m_board->logf("SSP mode: %s", esp_err_to_name(ssp_ret));
+
+    // Small delay to ensure Bluedroid is fully ready
+    vTaskDelay(pdMS_TO_TICKS(100));
 
     initHfpClient();
     initAvrcpController();
@@ -185,26 +189,60 @@ void BluetoothManager::initNvs() {
 void BluetoothManager::initController() {
     m_board->log("BT controller init...");
 
-    // Release BLE memory (we only use Classic BT)
-    ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
+    // Check controller status BEFORE any operations
+    esp_bt_controller_status_t status = esp_bt_controller_get_status();
+    m_board->logf("Controller status: %d", status);
+    m_board->log("(0=IDLE, 1=INITED, 2=ENABLED)");
 
+    // CRITICAL: Check if WiFi is running (WiFi/BT share same radio on ESP32)
+    wifi_mode_t mode;
+    esp_err_t wifi_check = esp_wifi_get_mode(&mode);
+    m_board->logf("WiFi check: %s", esp_err_to_name(wifi_check));
+
+    if (wifi_check == ESP_OK) {
+        m_board->logf("WiFi mode: %d - stopping", mode);
+        esp_wifi_stop();
+        esp_wifi_deinit();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        m_board->log("WiFi stopped");
+    } else if (wifi_check == ESP_ERR_WIFI_NOT_INIT) {
+        m_board->log("WiFi not init (good)");
+    } else {
+        m_board->logf("WiFi check error: %s", esp_err_to_name(wifi_check));
+    }
+
+    // EXPERIMENT: Try skipping BLE memory release
+    // Official example releases BLE mem, but it's failing with ESP_ERR_INVALID_STATE
+    // Memory release is optional - it just saves ~40KB RAM
+    // Let's try initializing without it to see if that's the blocker
+    m_board->log("Skipping BLE mem release");
+    m_board->log("(will use more RAM)");
+
+    // Initialize controller with default config
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    // Note: mode field removed in newer ESP-IDF versions
-    // Mode is set via BT_CONTROLLER_INIT_CONFIG_DEFAULT() and controller_mem_release()
+    m_board->logf("Config mode: %d", bt_cfg.mode);
+    m_board->logf("BLE max conn: %d", bt_cfg.ble_max_conn);
+    m_board->logf("BR/EDR max ACL: %d", bt_cfg.bt_max_acl_conn);
+    m_board->logf("BR/EDR max SYNC: %d", bt_cfg.bt_max_sync_conn);
 
-    esp_err_t ret = esp_bt_controller_init(&bt_cfg);
+    m_board->log("Calling esp_bt_controller_init()...");
+    esp_err_t ret;
+
+    ret = esp_bt_controller_init(&bt_cfg);
     if (ret != ESP_OK) {
-        m_board->logf("Controller fail: %s", esp_err_to_name(ret));
+        m_board->logf("Ctrl init: %s", esp_err_to_name(ret));
         return;
     }
+    m_board->log("Controller init OK");
 
-    ret = esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT);
+    // Enable controller in BTDM dual mode (must match init mode)
+    // Controller was initialized with mode=3 (BTDM), so enable with BTDM
+    ret = esp_bt_controller_enable(ESP_BT_MODE_BTDM);
     if (ret != ESP_OK) {
-        m_board->logf("Enable fail: %s", esp_err_to_name(ret));
+        m_board->logf("Enable: %s", esp_err_to_name(ret));
         return;
     }
-
-    m_board->log("BT controller OK");
+    m_board->log("Controller enabled");
 }
 
 void BluetoothManager::initBluedroid() {
@@ -212,13 +250,13 @@ void BluetoothManager::initBluedroid() {
 
     esp_err_t ret = esp_bluedroid_init();
     if (ret != ESP_OK) {
-        m_board->logf("Bluedroid fail: %s", esp_err_to_name(ret));
+        m_board->logf("Bluedroid init fail: %s", esp_err_to_name(ret));
         return;
     }
 
     ret = esp_bluedroid_enable();
     if (ret != ESP_OK) {
-        m_board->logf("Enable fail: %s", esp_err_to_name(ret));
+        m_board->logf("Bluedroid enable fail: %s", esp_err_to_name(ret));
         return;
     }
 
@@ -228,53 +266,76 @@ void BluetoothManager::initBluedroid() {
 void BluetoothManager::initHfpClient() {
     m_board->log("HFP Client init...");
 
-    // Register HFP Client callback
-    esp_hf_client_register_callback(hf_client_callback);
+    // Register HFP Client callback FIRST
+    esp_err_t ret = esp_hf_client_register_callback(hf_client_callback);
+    if (ret != ESP_OK) {
+        m_board->logf("HFP reg cb fail: %s (0x%x)", esp_err_to_name(ret), ret);
+        // Continue anyway, some ESP-IDF versions don't check this
+    }
 
     // Initialize HFP Client
-    esp_err_t ret = esp_hf_client_init();
+    ret = esp_hf_client_init();
     if (ret != ESP_OK) {
-        m_board->logf("HFP fail: %s", esp_err_to_name(ret));
-        return;
+        m_board->logf("HFP init fail: %s (0x%x)", esp_err_to_name(ret), ret);
+        // This is critical, but log and continue to see other errors
+    } else {
+        m_board->log("HFP init OK");
     }
 
     // Register audio data callbacks
-    esp_hf_client_register_data_callback(
+    ret = esp_hf_client_register_data_callback(
         hf_client_incoming_data_callback,
         hf_client_outgoing_data_callback
     );
-
-    m_board->log("HFP Client OK");
+    if (ret != ESP_OK) {
+        m_board->logf("HFP audio cb fail: %s", esp_err_to_name(ret));
+    } else {
+        m_board->log("HFP audio OK");
+    }
 }
 
 void BluetoothManager::initAvrcpController() {
     m_board->log("AVRCP init...");
 
-    esp_avrc_ct_register_callback(avrc_ct_callback);
-
-    esp_err_t ret = esp_avrc_ct_init();
+    // Register callback first
+    esp_err_t ret = esp_avrc_ct_register_callback(avrc_ct_callback);
     if (ret != ESP_OK) {
-        m_board->logf("AVRCP fail: %s", esp_err_to_name(ret));
-        return;
+        m_board->logf("AVRCP reg cb fail: %s (0x%x)", esp_err_to_name(ret), ret);
     }
 
-    m_board->log("AVRCP OK");
+    // Initialize AVRCP controller
+    ret = esp_avrc_ct_init();
+    if (ret != ESP_OK) {
+        m_board->logf("AVRCP init fail: %s (0x%x)", esp_err_to_name(ret), ret);
+    } else {
+        m_board->log("AVRCP init OK");
+    }
 }
 
 void BluetoothManager::setDiscoverable() {
     m_board->log("Setting discoverable...");
 
-    // Set scan mode: connectable + discoverable
-    esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
-
-    // Set Class of Device: Audio - Hands-Free
-    esp_bt_cod_t cod = {0};
-    cod.major = ESP_BT_COD_MAJOR_DEV_AV;          // Audio/Video device
+    // Set Class of Device FIRST (before scan mode)
+    esp_bt_cod_t cod;
     cod.minor = 0x04;                              // Hands-free
+    cod.major = ESP_BT_COD_MAJOR_DEV_AV;          // Audio/Video device
     cod.service = ESP_BT_COD_SRVC_AUDIO |         // Audio service
                   ESP_BT_COD_SRVC_RENDERING |     // Rendering service
                   ESP_BT_COD_SRVC_TELEPHONY;      // Telephony service
-    esp_bt_gap_set_cod(cod, ESP_BT_SET_COD_ALL);
+    cod.reserved_8 = 0;
+    esp_err_t cod_ret = esp_bt_gap_set_cod(cod, ESP_BT_SET_COD_ALL);
+    m_board->logf("COD set: %s", esp_err_to_name(cod_ret));
+
+    // Set scan mode: connectable + discoverable
+    esp_err_t scan_ret = esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
+    m_board->logf("Scan mode: %s", esp_err_to_name(scan_ret));
+
+    // Get and log the device address for verification
+    const uint8_t* addr = esp_bt_dev_get_address();
+    if (addr) {
+        m_board->logf("BT MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+            addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+    }
 
     m_board->log("Discoverable!");
 }

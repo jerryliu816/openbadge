@@ -1,7 +1,7 @@
 {
     "version":            "1",
     "project_name":       "openbadge",
-    "project_version":    "1",
+    "project_version":    "db1d853-dirty",
     "project_path":       "C:/dev4/openbadge",
     "idf_path":           "C:/Users/jerry/.platformio/packages/framework-espidf",
     "build_dir":          "C:/dev4/openbadge/.pio/build/m5stickc-plus2",

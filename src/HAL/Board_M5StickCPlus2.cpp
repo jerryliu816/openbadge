@@ -5,8 +5,10 @@
 void Board_M5StickCPlus2::init() {
     // Configure M5Unified for StickC Plus2
     auto cfg = M5.config();
-    cfg.internal_spk = true;   // Enable internal speaker (PAM8303)
-    cfg.internal_mic = true;   // Enable internal microphone (SPM1423)
+    // TEMPORARILY DISABLE speaker/mic to avoid I2S conflicts with Bluetooth
+    // Will re-enable after Bluetooth is stable
+    cfg.internal_spk = false;  // Disable internal speaker (PAM8303)
+    cfg.internal_mic = false;  // Disable internal microphone (SPM1423)
     cfg.output_power = true;   // CRITICAL: Prevent auto-shutdown on battery
     M5.begin(cfg);
 
@@ -14,6 +16,10 @@ void Board_M5StickCPlus2::init() {
     // Unlike Core S3, we don't need explicit M5.Power.begin() call
     // cfg.output_power = true prevents 60-second auto-shutdown on battery
 
+    // TEMPORARILY COMMENTED OUT: Speaker/mic initialization
+    // Causes stack overflow in spk_task when combined with Bluetooth
+    // Will re-enable after Bluetooth is working
+    /*
     // Configure speaker for voice audio (PAM8303 via I2S GPIO0)
     auto spk_cfg = M5.Speaker.config();
     spk_cfg.sample_rate = m_sampleRate;
@@ -31,6 +37,7 @@ void Board_M5StickCPlus2::init() {
     mic_cfg.magnification = 16;          // Gain (may need tuning for sensitivity)
     M5.Mic.config(mic_cfg);
     M5.Mic.begin();
+    */
 
     // Initialize display (portrait orientation)
     // Try rotation 0 first; if display is upside down, try rotation 2
@@ -55,8 +62,7 @@ void Board_M5StickCPlus2::init() {
     // Initial log messages
     log("OpenBadge v1.0");
     log("M5StickC Plus2");
-    logf("Speaker: %d Hz", m_sampleRate);
-    logf("Mic: %d Hz", m_sampleRate);
+    log("Audio: BT only");  // Using Bluetooth for audio, not built-in speaker/mic
     log("Hardware ready");
     log("Press Button A");
 }

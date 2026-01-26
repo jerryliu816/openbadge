@@ -51,6 +51,12 @@ public:
     void sendBvra();
 
     /**
+     * Stop HFP Voice Recognition (AT+BVRA=0)
+     * Used to end the audio session (push-to-talk release)
+     */
+    void stopBvra();
+
+    /**
      * Check if trigger is allowed (debounce, state validation)
      * @return true if trigger should be processed
      */

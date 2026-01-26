@@ -209,6 +209,14 @@ size_t Board_M5StickCPlus2::writeAudio(const uint8_t* data, size_t size) {
     // PAM8303 speaker via I2S on GPIO0 (M5Unified handles routing)
     bool success = M5.Speaker.playRaw((const int16_t*)data, samples, m_sampleRate, false, 1, -1);
 
+    // Debug: Log speaker playback periodically (every ~1 second at 50Hz callback rate)
+    static uint32_t playbackCount = 0;
+    playbackCount++;
+    if (playbackCount % 50 == 0) {
+        logf("[Speaker] Playback #%u: %zu bytes, %zu samples, %s",
+             playbackCount, size, samples, success ? "OK" : "FAIL");
+    }
+
     return success ? size : 0;
 }
 
@@ -231,7 +239,23 @@ size_t Board_M5StickCPlus2::readAudio(uint8_t* data, size_t size) {
         // Copy to output buffer
         size_t bytesToCopy = samplesToRead * sizeof(int16_t);
         memcpy(data, m_micBuffer, bytesToCopy);
+
+        // Debug: Log microphone capture periodically (every ~1 second at 50Hz callback rate)
+        static uint32_t captureCount = 0;
+        captureCount++;
+        if (captureCount % 50 == 0) {
+            logf("[Mic] Capture #%u: %zu bytes, %zu samples",
+                 captureCount, bytesToCopy, samplesToRead);
+        }
+
         return bytesToCopy;
+    }
+
+    // Debug: Log mic failure periodically
+    static uint32_t failCount = 0;
+    failCount++;
+    if (failCount % 50 == 0) {
+        logf("[Mic] Failed to record after %u attempts", failCount);
     }
 
     return 0;

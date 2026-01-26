@@ -1,0 +1,1 @@
+Since the M5StickC Plus 2 device we're using in portrait mode as limited characters, when outputing content to the display, try to abbreviate and keep the length of each line to 15 characters or less when possible.

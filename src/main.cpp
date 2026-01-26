@@ -65,9 +65,20 @@ void loop() {
     // Update Bluetooth manager
     g_btManager->update();
 
-    // Handle user trigger (touch in STATUS area)
+    // Track SCO state changes for UI updates
+    static bool lastScoState = false;
+    bool currentScoState = g_btManager->isScoConnected();
+
+    // Handle user trigger (Button A press)
     if (g_board->isActionTriggered()) {
-        if (g_btManager->canTrigger()) {
+        if (currentScoState) {
+            // Push-to-talk: Button A pressed while SCO is active
+            // This means user wants to STOP speaking
+            g_board->log(">>> Stopping voice...");
+            g_board->setLedStatus(StatusState::Idle);
+            g_btManager->stopBvra();    // Send AT+BVRA=0 to end voice recognition
+        } else if (g_btManager->canTrigger()) {
+            // Button A pressed when idle - START speaking
             // Update UI to show we're activating
             g_board->setLedStatus(StatusState::Listening);
 
@@ -81,18 +92,17 @@ void loop() {
         // canTrigger() logs the reason if it returns false
     }
 
-    // Track SCO state changes for UI updates
-    static bool lastScoState = false;
-    bool currentScoState = g_btManager->isScoConnected();
-
+    // Update UI based on SCO state changes
     if (currentScoState != lastScoState) {
         if (currentScoState) {
             // SCO just connected - voice session active
             g_board->setLedStatus(StatusState::Listening);
+            g_board->log("Voice session started");
         } else {
             // SCO disconnected - session ended
             if (g_btManager->isConnected()) {
                 g_board->setLedStatus(StatusState::Idle);
+                g_board->log("Voice session ended");
             } else {
                 g_board->setLedStatus(StatusState::Disconnected);
             }

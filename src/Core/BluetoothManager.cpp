@@ -408,6 +408,13 @@ void BluetoothManager::handleAudioState(uint8_t state) {
 void BluetoothManager::handleIncomingAudio(const uint8_t* data, uint32_t len) {
     // Phone -> Speaker
     if (m_board && len > 0) {
+        // Debug: Log incoming audio packets periodically (every ~1 second at 50Hz callback rate)
+        static uint32_t audioPacketCount = 0;
+        audioPacketCount++;
+        if (audioPacketCount % 50 == 0) {
+            BT_LOGF("[RX Audio] Received packet #%u, %u bytes", audioPacketCount, len);
+        }
+
         m_board->writeAudio(data, len);
     }
 }
@@ -415,7 +422,16 @@ void BluetoothManager::handleIncomingAudio(const uint8_t* data, uint32_t len) {
 uint32_t BluetoothManager::handleOutgoingAudio(uint8_t* data, uint32_t len) {
     // Mic -> Phone
     if (m_board && len > 0) {
-        return m_board->readAudio(data, len);
+        uint32_t bytesRead = m_board->readAudio(data, len);
+
+        // Debug: Log outgoing audio packets periodically (every ~1 second at 50Hz callback rate)
+        static uint32_t audioPacketCount = 0;
+        audioPacketCount++;
+        if (audioPacketCount % 50 == 0) {
+            BT_LOGF("[TX Audio] Sent packet #%u, %u bytes", audioPacketCount, bytesRead);
+        }
+
+        return bytesRead;
     }
     return 0;
 }
@@ -476,6 +492,19 @@ void BluetoothManager::sendBvra() {
     // Note: Not all phones support this command
     esp_hf_client_start_voice_recognition();
     m_board->log("BVRA sent");
+}
+
+void BluetoothManager::stopBvra() {
+    if (!m_slcConnected) {
+        m_board->log("Not connected!");
+        return;
+    }
+
+    m_board->log("Sending BVRA deactivate...");
+    // AT+BVRA=0 deactivates voice recognition on the phone
+    // This should end the SCO audio session
+    esp_hf_client_stop_voice_recognition();
+    m_board->log("BVRA stop sent");
 }
 
 bool BluetoothManager::canTrigger() {
